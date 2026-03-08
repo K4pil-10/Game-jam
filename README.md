@@ -9,3 +9,5 @@ There are obstackles in ach mode which killed the player.
 There are also some flag which denoted msg best its like a illusion.
 <br>
 Rate this game and enjoy it to play.
+<br>
+link of game: games-jam.vercel.app
