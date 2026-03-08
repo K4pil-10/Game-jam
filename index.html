@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BENEATH THE GROUND - CLEAN PATHS</title>
+    <link rel="shortcut icon" href="logo3.png" type="image/x-icon">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0b0c10;
+            color: #c5c6c7;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 10px 0;
+            font-size: 32px;
+            color: #66fcf1;
+            text-shadow: 0 0 15px rgba(102, 252, 241, 0.6);
+            letter-spacing: 4px;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0,0,0,1);
+            border: 4px solid #1f2833;
+            border-radius: 12px;
+            overflow: hidden;
+            width: 800px;
+            height: 450px;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            background: #000;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            background: rgba(11, 12, 16, 0.9);
+            transition: 0.5s;
+        }
+        .btn {
+            background: #66fcf1;
+            color: #0b0c10;
+            border: none;
+            padding: 14px 40px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 10px;
+            transition: 0.2s;
+            width: 220px;
+            clip-path: polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%);
+        }
+        .btn:hover {
+            background: #45a29e;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(102, 252, 241, 0.4);
+        }
+        #instructions {
+            margin-top: 20px;
+            color: #45a29e;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .key {
+            border: 1px solid #66fcf1;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin: 0 2px;
+        }
+    </style>
+</head>
+<body>
+    <h1>BENEATH THE GROUND</h1>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="450"></canvas>
+        <div id="ui-layer">
+            <div id="stats" style="display:none;">
+                <div id="depth-txt" style="color:#66fcf1; font-weight:bold;">DEPTH: 0m</div>
+                <div id="level-txt" style="color:#45a29e; font-size: 12px;">ZONE: SURFACE</div>
+            </div>
+        </div>
+        <div id="menu" class="screen">
+            <h2 style="color:#66fcf1; margin-bottom:30px; letter-spacing: 5px;">SELECT DIFFICULTY</h2>
+            <button class="btn" onclick="startGame('easy')">CAUTIOUS</button>
+            <button class="btn" onclick="startGame('medium')">EXPLORER</button>
+            <button class="btn" onclick="startGame('hard')">DESCENDER</button>
+        </div>
+        <div id="overlay" class="screen" style="display:none;">
+            <h2 id="death-msg" style="color: #ff4d4d; letter-spacing: 3px;">VOICE LOST IN VACUUM</h2>
+            <button class="btn" onclick="retryLevel()" style="background:#ff4d4d">RE-DEPLOY</button>
+            <button class="btn" onclick="location.reload()" style="background:#333; color:#fff; width:150px; font-size:12px;">SURFACE</button>
+        </div>
+    </div>
+    <div id="instructions">
+        <span class="key">W / ↑</span> JUMP | <span class="key">A / D</span> MOVE | <span class="key">R</span> RESET
+    </div>
+
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let backgroundOsc = null;
+
+        function playSound(freq, type, duration, volume, slide = 0) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            if (slide) {
+                osc.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + duration);
+            }
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playJumpSound() { 
+            playSound(150, 'triangle', 0.2, 0.2, 400); 
+        }
+        
+        function playDeathSound() { 
+            playSound(100, 'sawtooth', 0.5, 0.3, 20); 
+        }
+        
+        function playScreamSound() { 
+            playSound(400, 'sawtooth', 2.0, 0.1, 800); 
+        }
+
+        function startAmbience() {
+            if (backgroundOsc) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(60, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            backgroundOsc = { osc, gain };
+        }
+
+        function updateAmbience(level) {
+            if (backgroundOsc) {
+                backgroundOsc.osc.frequency.setTargetAtTime(60 - (level * 5), audioCtx.currentTime, 1);
+            }
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let currentLevel = 0;
+        let gameActive = false;
+        let isDead = false;
+        let isSpaceFalling = false;
+        let spaceTimer = 0;
+        let stars = [];
+        const keys = {};
+        const config = { 
+            width: 800, 
+            height: 450, 
+            floorY: 380, 
+            gravity: 0.6 
+        };
+        const player = { 
+            x: 50, 
+            y: 0, 
+            w: 24, 
+            h: 42, 
+            vx: 0, 
+            vy: 0, 
+            speed: 0.8, 
+            friction: 0.85, 
+            jump: -13, 
+            grounded: false, 
+            dir: 1, 
+            anim: 0, 
+            scale: 1, 
+            rotation: 0 
+        };
+        let levelData = { 
+            obstacles: [], 
+            deco: [], 
+            holes: [] 
+        };
+
+        const warningTexts = ["ARE YOU SURE?", "GO AHEAD...", "TRUST ME", "PROCEED?", "EXIT HERE"];
+
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if(e.code === 'KeyR') {
+                retryLevel();
+            }
+        });
+        
+        window.addEventListener('keyup', e => {
+            keys[e.code] = false;
+        });
+
+        for(let i=0; i<150; i++) {
+            stars.push({
+                x: Math.random() * 800, 
+                y: Math.random() * 450, 
+                s: Math.random() * 2
+            });
+        }
+
+        function createLevel(idx) {
+            levelData.obstacles = []; 
+            levelData.deco = []; 
+            levelData.holes = [];
+            let p1 = 650 + Math.random() * 80;
+            let p2 = 300 + Math.random() * 150;
+            if(Math.random() > 0.5) {
+                [p1, p2] = [p2, p1];
+            }
+
+            levelData.holes.push(
+                { x: p1, isReal: true, hasFlag: false },
+                { x: p2, isReal: false, hasFlag: true, label: warningTexts[Math.floor(Math.random()*warningTexts.length)] }
+            );
+
+            const minGap = 100;
+            function isSpaceClear(x) {
+                if (x < 150) return false; 
+                for (let h of levelData.holes) {
+                    if (Math.abs(x - h.x) < minGap) return false;
+                }
+                for (let ob of levelData.obstacles) {
+                    if (Math.abs(x - ob.x) < minGap) return false;
+                }
+                return true;
+            }
+
+            const obstacleCount = 2 + Math.min(idx, 4); 
+            for (let i = 0; i < obstacleCount; i++) {
+                let placed = false;
+                let attempts = 0;
+                while (!placed && attempts < 20) {
+                    let testX = 200 + Math.random() * 500;
+                    if (isSpaceClear(testX)) {
+                        let type = Math.random() > 0.7 ? 'trap' : (Math.random() > 0.4 ? 'grass' : 'rock');
+                        levelData.obstacles.push({ 
+                            type, 
+                            x: testX, 
+                            w: 35, 
+                            h: 40 + (idx * 2), 
+                            color: type === 'rock' ? '#444' : (type === 'grass' ? '#2d5a27' : '#795548') 
+                        });
+                        placed = true;
+                    }
+                    attempts++;
+                }
+            }
+        }
+
+        function startGame(mode) {
+            audioCtx.resume(); 
+            startAmbience();
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('stats').style.display = 'block';
+            gameActive = true; 
+            loadLevel(0); 
+            gameLoop();
+        }
+
+        function loadLevel(idx) {
+            currentLevel = idx; 
+            isDead = false; 
+            isSpaceFalling = false; 
+            spaceTimer = 0;
+            player.x = 50; 
+            player.y = -50; 
+            player.vx = 0; 
+            player.vy = 5;
+            player.scale = 1; 
+            player.rotation = 0;
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('depth-txt').innerText = `DEPTH: ${idx * 100}m`;
+            updateAmbience(idx);
+            createLevel(idx);
+        }
+
+        function retryLevel() { 
+            if(gameActive) {
+                loadLevel(currentLevel); 
+            }
+        }
+
+        function update() {
+            if(!gameActive || isDead) return;
+            if(isSpaceFalling) {
+                spaceTimer++;
+                player.rotation += 0.15;
+                player.scale = Math.max(0.1, 1 - (spaceTimer / 180));
+                if(spaceTimer > 180) {
+                    isDead = true;
+                    document.getElementById('death-msg').innerText = "LOST IN SPACE";
+                    document.getElementById('overlay').style.display = 'flex';
+                }
+                return;
+            }
+
+            if (keys['ArrowLeft'] || keys['KeyA']) { 
+                player.vx -= player.speed; 
+                player.dir = -1; 
+            }
+            if (keys['ArrowRight'] || keys['KeyD']) { 
+                player.vx += player.speed; 
+                player.dir = 1; 
+            }
+            if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && player.grounded) {
+                player.vy = player.jump; 
+                player.grounded = false;
+                playJumpSound();
+            }
+
+            player.vx *= player.friction; 
+            player.vy += config.gravity;
+            player.x += player.vx; 
+            player.y += player.vy;
+
+            if (player.x <= 0) player.x = 0;
+            if (player.x + player.w >= config.width) player.x = config.width - player.w;
+
+            let inHole = null;
+            levelData.holes.forEach(h => { 
+                if(Math.abs(player.x - h.x + 12) < 25) {
+                    inHole = h; 
+                }
+            });
+
+            if (player.y + player.h > config.floorY) {
+                if (inHole) {
+                    if (player.y > config.height) {
+                        if(inHole.isReal) {
+                             loadLevel(currentLevel + 1);
+                             playSound(300, 'sine', 0.1, 0.2, 600); 
+                        } else { 
+                            isSpaceFalling = true; 
+                            spaceTimer = 0; 
+                            playScreamSound();
+                        }
+                    }
+                } else {
+                    player.y = config.floorY - player.h; 
+                    player.vy = 0; 
+                    player.grounded = true;
+                }
+            }
+
+            levelData.obstacles.forEach(ob => {
+                if (player.x < ob.x + 30 && player.x + 24 > ob.x && player.y + 42 > config.floorY - ob.h) {
+                    isDead = true; 
+                    playDeathSound();
+                    document.getElementById('death-msg').innerText = "CRUSHED"; 
+                    document.getElementById('overlay').style.display = 'flex';
+                }
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, 800, 450);
+            if (isSpaceFalling) {
+                ctx.fillStyle = '#000'; 
+                ctx.fillRect(0, 0, 800, 450);
+                ctx.fillStyle = '#fff';
+                stars.forEach(s => { 
+                    s.y -= 8; 
+                    if(s.y < 0) s.y = 450; 
+                    ctx.fillRect(s.x, s.y, s.s, s.s); 
+                });
+                ctx.fillStyle = "#66fcf1";
+                ctx.font = `bold ${30 * player.scale}px Arial`;
+                ctx.textAlign = "center";
+                ctx.fillText("AAAAAAHHHHHH!!!", 400, 225);
+            } else {
+                if (currentLevel === 0) {
+                    let sky = ctx.createLinearGradient(0, 0, 0, 380); 
+                    sky.addColorStop(0, '#4facfe'); 
+                    sky.addColorStop(1, '#f093fb');
+                    ctx.fillStyle = sky; 
+                    ctx.fillRect(0, 0, 800, 450);
+                } else {
+                    ctx.fillStyle = '#0b0c10'; 
+                    ctx.fillRect(0, 0, 800, 450);
+                }
+                ctx.fillStyle = currentLevel === 0 ? '#27ae60' : '#1a1a1a';
+                ctx.fillRect(0, 380, 800, 70);
+                levelData.holes.forEach(h => {
+                    ctx.fillStyle = '#000'; 
+                    ctx.beginPath(); 
+                    ctx.ellipse(h.x, 385, 40, 15, 0, 0, Math.PI*2); 
+                    ctx.fill();
+                    if (h.hasFlag) {
+                        const fx = h.x - 70;
+                        ctx.strokeStyle = '#c5c6c7'; 
+                        ctx.lineWidth = 3;
+                        ctx.beginPath(); 
+                        ctx.moveTo(fx, 380); 
+                        ctx.lineTo(fx, 320); 
+                        ctx.stroke();
+                        ctx.fillStyle = '#1f2833'; 
+                        ctx.fillRect(fx, 315, 120, 25);
+                        ctx.strokeStyle = '#66fcf1'; 
+                        ctx.strokeRect(fx, 315, 120, 25);
+                        ctx.fillStyle = '#66fcf1'; 
+                        ctx.font = 'bold 11px Arial'; 
+                        ctx.textAlign = 'center';
+                        ctx.fillText(h.label, fx + 60, 332);
+                    }
+                });
+                levelData.obstacles.forEach(ob => {
+                    ctx.fillStyle = ob.color;
+                    if(ob.type === 'rock') { 
+                        ctx.beginPath(); 
+                        ctx.moveTo(ob.x, 380); 
+                        ctx.lineTo(ob.x+17, 380-ob.h); 
+                        ctx.lineTo(ob.x+35, 380); 
+                        ctx.fill(); 
+                    }
+                    else if(ob.type === 'grass') { 
+                        for(let j=0; j<3; j++){ 
+                            ctx.beginPath(); 
+                            ctx.moveTo(ob.x+j*10, 380); 
+                            ctx.lineTo(ob.x+j*10+5, 380-ob.h); 
+                            ctx.lineTo(ob.x+j*10+10, 380); 
+                            ctx.fill(); 
+                        } 
+                    }
+                    else { 
+                        ctx.fillRect(ob.x, 375, 40, 5); 
+                        ctx.strokeStyle='#999'; 
+                        ctx.strokeRect(ob.x+5, 365, 30, 10); 
+                    }
+                });
+            }
+            drawPlayer();
+        }
+
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x + player.w/2, player.y + player.h/2);
+            ctx.rotate(player.rotation);
+            ctx.scale(player.scale * player.dir, player.scale);
+            ctx.translate(-player.w/2, -player.h/2);
+            ctx.fillStyle = '#96281b'; 
+            ctx.beginPath(); 
+            ctx.moveTo(-5, 7); 
+            ctx.lineTo(-18, 27); 
+            ctx.lineTo(-5, 32); 
+            ctx.fill();
+            ctx.fillStyle = '#2c3e50'; 
+            ctx.fillRect(-8, 7, 16, 25);
+            ctx.fillStyle = '#1a252f'; 
+            ctx.fillRect(-7, 30, 5, 12); 
+            ctx.fillRect(2, 30, 5, 12);
+            ctx.fillStyle = '#f1c27d'; 
+            ctx.beginPath(); 
+            ctx.arc(0, 2, 9, 0, Math.PI*2); 
+            ctx.fill();
+            ctx.fillStyle = (isSpaceFalling || isDead) ? '#fff' : '#66fcf1'; 
+            ctx.fillRect(2, 0, 4, isSpaceFalling ? 4 : 2);
+            ctx.restore();
+        }
+
+        function gameLoop() { 
+            update(); 
+            draw(); 
+            if(gameActive) {
+                requestAnimationFrame(gameLoop); 
+            }
+        }
+    </script>
+</body>
+</html>
